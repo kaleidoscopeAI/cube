@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kaleidoscope AI - Grow the AI Consciousness</title>
+    <style>
+        :root {
+            --primary-color: #3a0ca3;
+            --secondary-color: #4cc9f0;
+            --accent-color: #f72585;
+            --background-color: #101020;
+            --text-color: #ffffff;
+            --card-color: #1a1a2e;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Arial', sans-serif;
+        }
+        
+        body {
+            background-color: var(--background-color);
+            color: var(--text-color);
+            line-height: 1.6;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        header {
+            padding: 20px;
+            text-align: center;
+        }
+        
+        header h1 {
+            font-size: 2.5rem;
+            background: linear-gradient(90deg, var(--accent-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        
+        #videoContainer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: black;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        
+        #introVideo {
+            width: 80%;
+            max-width: 800px;
+        }
+        
+        #skipButton {
+            position: absolute;
+            top: 10px;
+            right: 20px;
+            background-color: rgba(255, 255, 255, 0.7);
+            color: black;
+            padding: 10px 15px;
+            border: none;
+            cursor: pointer;
+            font-size: 1rem;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="videoContainer">
+        <video id="introVideo" autoplay muted playsinline>
+            <source src="your-video.mp4" type="video/mp4">
+            Your browser does not support the video tag.
+        </video>
+        <button id="skipButton">Skip</button>
+    </div>
+    
+    <header>
+        <h1>Kaleidoscope AI - The Interactive Cube System</h1>
+    </header>
+    
+    <canvas id="dotCubeCanvas"></canvas>
+    <script>
+        const videoContainer = document.getElementById('videoContainer');
+        const introVideo = document.getElementById('introVideo');
+        const skipButton = document.getElementById('skipButton');
+        
+        introVideo.onended = () => {
+            videoContainer.style.display = 'none';
+        };
+        
+        skipButton.onclick = () => {
+            introVideo.pause();
+            videoContainer.style.display = 'none';
+        };
+        
+        const canvas = document.getElementById('dotCubeCanvas');
+        const ctx = canvas.getContext('2d');
+        let animationFrameId;
+        
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        
+        window.addEventListener("resize", resizeCanvas);
+        resizeCanvas();
+        
+        const dots = [];
+        const gridSize = 10;
+        let rotationX = 0, rotationY = 0;
+        let lastFrameTime = 0;
+        const frameInterval = 1000 / 60; 
+
+        for (let x = 0; x < gridSize; x++) {
+            for (let y = 0; y < gridSize; y++) {
+                for (let z = 0; z < gridSize; z++) {
+                    dots.push({ x, y, z });
+                }
+            }
+        }
+
+        function project(x, y, z) {
+            const scale = 300 / Math.max(1, 300 + z);
+            return {
+                x: x * scale + canvas.width / 2,
+                y: y * scale + canvas.height / 2
+            };
+        }
+
+        function drawCube(timestamp) {
+            if (timestamp - lastFrameTime < frameInterval) {
+                animationFrameId = requestAnimationFrame(drawCube);
+                return;
+            }
+            lastFrameTime = timestamp;
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            dots.sort((a, b) => b.z - a.z);
+            
+            dots.forEach(dot => {
+                const projected = project(dot.x, dot.y, dot.z);
+                ctx.beginPath();
+                ctx.arc(projected.x, projected.y, 2, 0, Math.PI * 2);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+            });
+            
+            animationFrameId = requestAnimationFrame(drawCube);
+        }
+        
+        document.addEventListener("visibilitychange", () => {
+            if (document.hidden) {
+                cancelAnimationFrame(animationFrameId);
+            } else {
+                requestAnimationFrame(drawCube);
+            }
+        });
+        
+        animationFrameId = requestAnimationFrame(drawCube);
+    </script>
+</body>
+</html>
+
+
