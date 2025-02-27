@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Interactive Dot Cube with Molecular Math</title>
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background-color: black;
+    }
+    canvas {
+      display: block;
+    }
+    #composition {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: white;
+      font-family: sans-serif;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="dotCubeCanvas"></canvas>
+  <div id="composition"></div>
+
+  <script>
+    const canvas = document.getElementById('dotCubeCanvas');
+    const ctx = canvas.getContext('2d');
+    const compositionDisplay = document.getElementById('composition');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    const gridSize = 10; // Original grid size
+    const dotSpacing = Math.min(canvas.width, canvas.height) / (gridSize * 2);
+    const dots = [];
+    let selectedDots = [];
+
+    // Initialize dots
+    for (let x = 0; x < gridSize; x++) {
+      for (let y = 0; y < gridSize; y++) {
+        for (let z = 0; z < gridSize; z++) {
+          dots.push({
+            x: x - gridSize / 2,
+            y: y - gridSize / 2,
+            z: z - gridSize / 2,
+            brightness: 1,
+            selected: false,
+          });
+        }
+      }
+    }
+
+    let rotationX = 0;
+    let rotationY = 0;
+    let rotationZ = 0;
+    let mouseX = 0;
+    let mouseY = 0;
+    let isDragging = false;
+
+    canvas.addEventListener('mousedown', (e) => {
+      isDragging = true;
+      mouseX = e.clientX;
+      mouseY = e.clientY;
+    });
+
+    canvas.addEventListener('mouseup', () => {
+      isDragging = false;
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (isDragging) {
+        const deltaX = e.clientX - mouseX;
+        const deltaY = e.clientY - mouseY;
+        rotationY += deltaX * 0.01;
+        rotationX += deltaY * 0.01;
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+      }
+    });
+
+    function project(x, y, z) {
+      const perspective = dotSpacing * 5;
+      const scale = perspective / (perspective + z);
+
+      const projectedX = x * scale * dotSpacing + canvas.width / 2;
+      const projectedY = y * scale * dotSpacing + canvas.height / 2;
+
+      return { x: projectedX, y: projectedY };
+    }
+
+    function rotateX(y, z, angle) {
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const rotatedY = y * cos - z * sin;
+      const rotatedZ = y * sin + z * cos;
+      return { y: rotatedY, z: rotatedZ };
+    }
+
+    function rotateY(x, z, angle) {
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const rotatedX = x * cos + z * sin;
+      const rotatedZ = -x * sin + z * cos;
+      return { x: rotatedX, z: rotatedZ };
+    }
+
+    function rotateZ(x, y, angle) {
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const rotatedX = x * cos - y * sin;
+      const rotatedY = x * sin + y * cos;
+      return { x: rotatedX, y: rotatedY };
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      dots.forEach((dot) => {
+        let { x, y, z } = dot;
+
+        // Apply rotations
+        let rotated = rotateX(y, z, rotationX);
+        y = rotated.y;
+        z = rotated.z;
+
+        rotated = rotateY(x, z, rotationY);
+        x = rotated.x;
+        z = rotated.z;
+
+        rotated = rotateZ(x, y, rotationZ);
+        x = rotated.x;
+        y = rotated.y;
+
+        const projected = project(x, y, z);
+        const brightness = dot.brightness;
+
+        ctx.beginPath();
+        ctx.arc(projected.x, projected.y, 2 * brightness, 0, Math.PI * 2);
+        ctx.fillStyle = dot.selected ? 'yellow' : `rgba(255, 255, 255, ${brightness})`;
+        ctx.fill();
+      });
+
+      requestAnimationFrame(draw);
+    }
+
+    canvas.addEventListener('click', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+
+      dots.forEach((dot) => {
+        const projected = project(dot.x, dot.y, dot.z);
+        const distance = Math.sqrt(
+          Math.pow(mouseX - projected.x, 2) + Math.pow(mouseY - projected.y, 2)
+        );
+
+        if (distance < 5) {
+          dot.selected = !dot.selected;
+          updateComposition();
+        }
+      });
+    });
+
+    function updateComposition() {
+      selectedDots = dots.filter((dot) => dot.selected);
+      compositionDisplay.textContent = `Selected Dots: ${selectedDots.length}`;
+    }
+
+    draw();
+  </script>
+</body>
+</html>

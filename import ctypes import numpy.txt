@@ -1,0 +1,260 @@
+import ctypes
+import numpy as np
+import os
+from typing import Dict, List, Tuple, Optional, Any
+
+# Compile the C extension (this would normally be in a setup script)
+def compile_molecular_binding():
+    import subprocess
+    
+    # Get current directory
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    c_file = os.path.join(current_dir, "molecular_binding_sim.c")
+    out_file = os.path.join(current_dir, "libmolbind.so")
+    
+    # Compile the shared library
+    cmd = f"gcc -shared -fPIC -O3 -o {out_file} {c_file} -lm"
+    subprocess.check_call(cmd, shell=True)
+    
+    return out_file
+
+# Try to load the library, compile if not found
+try:
+    lib_path = compile_molecular_binding()
+    molbind = ctypes.CDLL(lib_path)
+except Exception as e:
+    print(f"Warning: Failed to compile or load molecular binding library: {e}")
+    molbind = None
+
+# Define C structures matching the C code
+class Vec3(ctypes.Structure):
+    _fields_ = [
+        ("x", ctypes.c_double),
+        ("y", ctypes.c_double),
+        ("z", ctypes.c_double)
+    ]
+
+class Atom(ctypes.Structure):
+    _fields_ = [
+        ("atom_type", ctypes.c_int),
+        ("position", Vec3),
+        ("charge", ctypes.c_double),
+        ("radius", ctypes.c_double),
+        ("bonded_to", ctypes.c_int * 8),
+        ("num_bonds", ctypes.c_int)
+    ]
+
+class Molecule(ctypes.Structure):
+    _fields_ = [
+        ("atoms", ctypes.POINTER(Atom)),
+        ("num_atoms", ctypes.c_int),
+        ("name", ctypes.c_char * 64),
+        ("energy", ctypes.c_double),
+        ("center", Vec3),
+        ("tension_field", ctypes.POINTER(ctypes.c_double)),
+        ("field_resolution", ctypes.c_int)
+    ]
+
+# Set function prototypes
+if molbind:
+    molbind.calculate_binding_energy.argtypes = [ctypes.POINTER(Molecule), ctypes.POINTER(Molecule)]
+    molbind.calculate_binding_energy.restype = ctypes.c_double
+    
+    molbind.optimize_binding_conformation.argtypes = [ctypes.POINTER(Molecule), ctypes.POINTER(Molecule), ctypes.c_int]
+    molbind.optimize_binding_conformation.restype = None
+    
+    molbind.init_molecule.argtypes = [ctypes.POINTER(Molecule), ctypes.c_int]
+    molbind.init_molecule.restype = None
+    
+    molbind.free_molecule.argtypes = [ctypes.POINTER(Molecule)]
+    molbind.free_molecule.restype = None
+    
+    molbind.set_atom.argtypes = [ctypes.POINTER(Molecule), ctypes.c_int, ctypes.c_int, 
+                                ctypes.c_double, ctypes.c_double, ctypes.c_double,
+                                ctypes.c_double, ctypes.c_double]
+    molbind.set_atom.restype = None
+    
+    molbind.add_bond.argtypes = [ctypes.POINTER(Molecule), ctypes.c_int, ctypes.c_int]
+    molbind.add_bond.restype = None
+    
+    molbind.set_tension_field.argtypes = [ctypes.POINTER(Molecule), ctypes.POINTER(ctypes.c_double), ctypes.c_int]
+    molbind.set_tension_field.restype = None
+    
+    molbind.calculate_molecule_center.argtypes = [ctypes.POINTER(Molecule)]
+    molbind.calculate_molecule_center.restype = None
+
+class MolecularBindingSimulator:
+    """Python interface to the C molecular binding simulation"""
+    
+    def __init__(self):
+        self.molecules = {}
+        self.binding_pairs = []
+        self.tension_field = None
+        self.resolution = 0
+        
+        # Element properties (atomic number -> properties)
+        self.element_properties = {
+            1: {"name": "H", "radius": 1.20, "mass": 1.008},
+            6: {"name": "C", "radius": 1.70, "mass": 12.011},
+            7: {"name": "N", "radius": 1.55, "mass": 14.007},
+            8: {"name": "O", "radius": 1.52, "mass": 15.999},
+            15: {"name": "P", "radius": 1.80, "mass": 30.974},
+            16: {"name": "S", "radius": 1.80, "mass": 32.065}
+        }
+    
+    def create_molecule_from_data(self, molecule_data: Dict[str, Any]) -> str:
+        """Create a molecule from data dict"""
+        if not molbind:
+            raise RuntimeError("Molecular binding library not available")
+            
+        # Generate molecule ID
+        molecule_id = molecule_data.get('id', f"mol_{len(self.molecules)}")
+        
+        # Create molecule structure
+        atoms = molecule_data.get('atoms', [])
+        num_atoms = len(atoms)
+        
+        mol = Molecule()
+        molbind.init_molecule(ctypes.byref(mol), num_atoms)
+        
+        # Set molecule name
+        name = molecule_data.get('name', molecule_id)
+        mol.name = ctypes.create_string_buffer(name.encode('utf-8')[:63])
+        
+        # Add atoms
+        for i, atom_data in enumerate(atoms):
+            atom_type = atom_data.get('element_num', 6)  # Default to carbon
+            x, y, z = atom_data.get('position', [0, 0, 0])
+            charge = atom_data.get('charge', 0.0)
+            radius = self.element_properties.get(atom_type, {"radius": 1.7})["radius"]
+            
+            molbind.set_atom(ctypes.byref(mol), i, atom_type, x, y, z, charge, radius)
+        
+        # Add bonds
+        bonds = molecule_data.get('bonds', [])
+        for bond in bonds:
+            atom1 = bond.get('atom1', 0)
+            atom2 = bond.get('atom2', 0)
+            molbind.add_bond(ctypes.byref(mol), atom1, atom2)
+        
+        # Calculate center
+        molbind.calculate_molecule_center(ctypes.byref(mol))
+        
+        # Store molecule
+        self.molecules[molecule_id] = mol
+        
+        return molecule_id
+    
+    def set_tension_field(self, field: np.ndarray):
+        """Set the tension field for binding calculations"""
+        if not field.flags.c_contiguous:
+            field = np.ascontiguousarray(field)
+            
+        # Store field as flat array
+        flat_field = field.flatten()
+        self.tension_field = flat_field
+        
+        # Get field dimensions
+        if field.ndim == 3:
+            self.resolution = field.shape[0]
+        else:
+            raise ValueError("Tension field must be 3D")
+            
+        # Create C array
+        field_ptr = flat_field.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
+        
+        # Update all molecules
+        for mol_id, mol in self.molecules.items():
+            molbind.set_tension_field(ctypes.byref(mol), field_ptr, self.resolution)
+    
+    def calculate_binding_energy(self, molecule1_id: str, molecule2_id: str) -> float:
+        """Calculate binding energy between two molecules"""
+        if not molbind:
+            return 0.0
+            
+        if molecule1_id not in self.molecules or molecule2_id not in self.molecules:
+            raise ValueError(f"Molecules {molecule1_id} and {molecule2_id} must be loaded")
+            
+        mol1 = self.molecules[molecule1_id]
+        mol2 = self.molecules[molecule2_id]
+        
+        energy = molbind.calculate_binding_energy(ctypes.byref(mol1), ctypes.byref(mol2))
+        
+        return energy
+    
+    def optimize_binding(self, molecule1_id: str, molecule2_id: str, max_iterations: int = 1000) -> Dict[str, Any]:
+        """Optimize binding conformation between two molecules"""
+        if not molbind:
+            return {"energy": 0.0}
+            
+        if molecule1_id not in self.molecules or molecule2_id not in self.molecules:
+            raise ValueError(f"Molecules {molecule1_id} and {molecule2_id} must be loaded")
+            
+        mol1 = self.molecules[molecule1_id]
+        mol2 = self.molecules[molecule2_id]
+        
+        # Optimize binding
+        molbind.optimize_binding_conformation(ctypes.byref(mol1), ctypes.byref(mol2), max_iterations)
+        
+        # Get final energy
+        energy = mol2.energy
+        
+        # Record binding pair
+        self.binding_pairs.append((molecule1_id, molecule2_id, energy))
+        
+        # Extract optimized positions for molecule2
+        positions = []
+        for i in range(mol2.num_atoms):
+            atom = mol2.atoms[i]
+            positions.append([atom.position.x, atom.position.y, atom.position.z])
+        
+        return {
+            "energy": energy,
+            "positions": positions,
+            "molecule1": molecule1_id,
+            "molecule2": molecule2_id
+        }
+    
+    def get_molecule_data(self, molecule_id: str) -> Dict[str, Any]:
+        """Get data about a molecule"""
+        if molecule_id not in self.molecules:
+            raise ValueError(f"Molecule {molecule_id} not found")
+            
+        mol = self.molecules[molecule_id]
+        
+        # Extract atom data
+        atoms = []
+        for i in range(mol.num_atoms):
+            atom = mol.atoms[i]
+            atom_type = atom.atom_type
+            element = self.element_properties.get(atom_type, {"name": "C"})["name"]
+            
+            atom_data = {
+                "element": element,
+                "element_num": atom_type,
+                "position": [atom.position.x, atom.position.y, atom.position.z],
+                "charge": atom.charge,
+                "radius": atom.radius,
+                "bonds": [atom.bonded_to[j] for j in range(atom.num_bonds)]
+            }
+            atoms.append(atom_data)
+        
+        return {
+            "id": molecule_id,
+            "name": mol.name.decode('utf-8'),
+            "num_atoms": mol.num_atoms,
+            "center": [mol.center.x, mol.center.y, mol.center.z],
+            "energy": mol.energy,
+            "atoms": atoms
+        }
+    
+    def cleanup(self):
+        """Free all molecules"""
+        if not molbind:
+            return
+            
+        for mol_id, mol in self.molecules.items():
+            molbind.free_molecule(ctypes.byref(mol))
+            
+        self.molecules = {}
+        self.binding_pairs = []
